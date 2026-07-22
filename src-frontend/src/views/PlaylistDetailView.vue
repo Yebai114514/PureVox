@@ -27,6 +27,11 @@ const playlist = computed(() => {
   );
 });
 
+const isUserPlaylist = computed(() => {
+  if (!playlist.value) return false;
+  return userPlaylists.items.some((p) => p.id === playlist.value!.id);
+});
+
 const tracks = computed(() => playlist.value?.tracks ?? []);
 
 const totalDuration = computed(() =>
@@ -148,7 +153,12 @@ async function playTrackById(id: string) {
               <Pause v-else class="w-4 h-4" fill="currentColor" :stroke-width="0" />
               {{ isPlayingThis && playerState.isPlaying ? '暂停' : '播放' }}
             </button>
-            <IconButton size="md" :title="saved ? '取消收藏' : '收藏'" @click="toggleSave">
+            <IconButton
+              v-if="!isUserPlaylist"
+              size="md"
+              :title="saved ? '取消收藏' : '收藏'"
+              @click="toggleSave"
+            >
               <Heart class="w-4 h-4" :fill="saved ? 'currentColor' : 'none'" :class="saved ? 'text-red-400' : ''" :stroke-width="1.5" />
             </IconButton>
           </div>
