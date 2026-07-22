@@ -1,6 +1,6 @@
 [package]
 name = "purevox"
-version = "0.1.0"
+version = "0.1.1"
 description = "PureVox 桌面音乐播放器"
 authors = ["PureVox"]
 edition = "2021"
