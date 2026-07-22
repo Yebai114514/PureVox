@@ -22,6 +22,16 @@ pub struct AppSettings {
     /// 个性化推荐总开关
     #[serde(default = "default_true")]
     pub personalization_enabled: bool,
+    /// DeepSeek 思考模式开关
+    #[serde(default)]
+    pub thinking_enabled: bool,
+    /// 思考深度：low / medium / high / max
+    #[serde(default = "default_reasoning_effort")]
+    pub reasoning_effort: String,
+}
+
+fn default_reasoning_effort() -> String {
+    "high".to_string()
 }
 
 fn default_true() -> bool {

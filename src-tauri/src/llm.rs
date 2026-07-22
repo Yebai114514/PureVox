@@ -59,25 +59,6 @@ struct ChoiceMessage {
 }
 
 #[derive(Debug, Deserialize)]
-struct LlmSelectedItem {
-    bvid: String,
-    #[allow(dead_code)]
-    title: String,
-    artist: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    reason: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct LlmFilterResponse {
-    #[serde(default)]
-    valid: bool,
-    #[serde(default)]
-    results: Vec<LlmSelectedItem>,
-}
-
-#[derive(Debug, Deserialize)]
 struct LlmTheme {
     title: String,
     #[serde(default)]
@@ -92,21 +73,58 @@ struct LlmThemesResponse {
     themes: Vec<LlmTheme>,
 }
 
-/// LLM 筛选结果项：BV 号 + AI 提取的歌手名（可能与 UP 主不同）
-#[derive(Debug, Clone)]
-pub struct LlmFilterItem {
-    pub bvid: String,
-    pub artist: String,
+/// 从标题中启发式提取歌手名
+/// 规则：优先取 " - "、"——" 或 "—" 前的内容，回退取「」或【】里的内容，再回退取 "/" 前的内容
+pub fn extract_artist_from_title(title: &str) -> Option<String> {
+    let trimmed = title.trim();
+
+    if let Some(idx) = trimmed.find(" - ") {
+        let candidate = trimmed[..idx].trim();
+        if !candidate.is_empty() && candidate.len() < 30 {
+            return Some(candidate.to_string());
+        }
+    }
+
+    for sep in &["——", "—", " – ", " / ", "/"] {
+        if let Some(idx) = trimmed.find(sep) {
+            let candidate = trimmed[..idx].trim();
+            if !candidate.is_empty() && candidate.len() < 30 {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    // 【歌手】模式
+    if let Some(start) = trimmed.find('【') {
+        if let Some(end) = trimmed[start..].find('】') {
+            let candidate = trimmed[start+3..start+end].trim();
+            if !candidate.is_empty() && candidate.len() < 30 {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    // 「歌手」模式
+    if let Some(start) = trimmed.find('「') {
+        if let Some(end) = trimmed[start..].find('」') {
+            let candidate = trimmed[start+3..start+end].trim();
+            if !candidate.is_empty() && candidate.len() < 30 {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    None
 }
 
-/// 调用 LLM 筛选歌曲。
-/// 返回按相关性排序的 (BV号, 歌手名) 列表；若调用失败则返回空列表，由调用方回退到本地启发式规则。
-/// 歌手名由 LLM 从标题中提取，是真正的演唱者而非 UP 主（上传者）。
+/// 调用 LLM 筛选歌曲，返回按相关性排序的 BV 号列表。
+/// 若调用失败或 LLM 未启用，返回空 Vec，由调用方回退本地规则。
+/// 歌手名不再由 LLM 提取，改用本地启发式。
 pub async fn llm_filter_songs(
     keyword: &str,
     candidates: &[BiliVideo],
     config: &LlmConfig,
-) -> Vec<LlmFilterItem> {
+) -> Vec<String> {
     if !config.enabled || config.api_key.is_empty() || config.model.is_empty() {
         return vec![];
     }
@@ -128,22 +146,14 @@ pub async fn llm_filter_songs(
         messages: vec![
             Message {
                 role: "system",
-                content: r#"You are a strict music content classifier for a music player.
+                content: r#"You classify music search results. Return ONLY selected labels as a JSON array.
 
-CRITICAL RULES:
-1. Select ONLY normal, playable single songs or official MVs that a user can listen to from start to finish.
-2. Strongly prefer songs with duration between 2 minutes and 3 minutes (120s-180s). Accept 90s-300s if clearly a single song.
-3. REJECT any video that is:
-   - tutorial, course, lesson, 教程, 教学, 体系课, 解析, 分析, 点评
-   - playlist, compilation, 盘点, 合集, 串烧, 多首, 多少首, 连续播放
-   - reaction, vlog, commentary, podcast, interview, news
-   - "1 hour", "10 hours", loop, 循环, 白噪音, 助眠 (unless explicitly requested)
-   - silent/no-audio, preview/teaser only, lyric video with no real audio
-   - karaoke/instrumental ONLY if the user query clearly asks for instrumental/karaoke
-4. Each result must be ONE song. Do NOT pick videos containing multiple songs stitched together.
-5. Prefer official uploads, studio versions, and high-play-count entries.
+Rules:
+- Select only single songs or official MVs
+- Reject tutorials, compilations, reaction, loop, white noise
+- Prefer 2-3 minute songs
 
-Return ONLY a compact JSON object: {"valid":true,"results":[{"bvid":"...","title":"...","artist":"..."}]} or {"valid":false,"results":[]}. No markdown, no explanation."#.to_string(),
+Reply ONLY a JSON array like ["a","c","f"] or []. No explanation."#.to_string(),
             },
             Message {
                 role: "user",
@@ -151,7 +161,7 @@ Return ONLY a compact JSON object: {"valid":true,"results":[{"bvid":"...","title
             },
         ],
         temperature: 0.1,
-        max_tokens: 2048,
+        max_tokens: 120,
     };
 
     let resp = match client
@@ -187,62 +197,42 @@ Return ONLY a compact JSON object: {"valid":true,"results":[{"bvid":"...","title
         .unwrap_or("")
         .to_string();
 
-    parse_llm_response(&content)
+    let indices = parse_llm_response(&content);
+    indices
+        .into_iter()
+        .filter_map(|idx| candidates.get(idx).map(|c| c.bvid.clone()))
+        .collect()
 }
 
 fn build_prompt(keyword: &str, candidates: &[BiliVideo]) -> String {
     let mut prompt = format!(
-        r#"User query: "{}"
+        r#"query: "{}"
 
-From the following Bilibili videos, select up to 30 items that best match the query as SINGLE songs or official music videos (MV). A normal single song is one continuous track, not a playlist, not a tutorial, not a compilation.
-
-DURATION REQUIREMENT (very important):
-- Strongly prefer videos with duration 2:00 - 3:00 (120s-180s)
-- Accept 1:30 - 5:00 (90s-300s) if it is clearly a single song
-- REJECT any video longer than 5:00 unless it is an official MV of a known song
-- REJECT any video shorter than 1:30 (likely preview, teaser, or noise)
-
-EXCLUDE (reject):
-- tutorials, courses, lessons, analysis, commentary (教程/教学/体系课/解析/分析/点评)
-- compilations, playlists, countdowns, top-N lists (盘点/合集/多首/多少首/排行榜)
-- reaction videos, vlogs, podcasts, interviews, news
-- long loops, 1 hour, white noise, sleep aids
-- silent videos, lyric videos with no real audio, pure static images
-- multi-song mashups, medleys, 串烧
-
-Return ONLY a JSON array in this exact format (no markdown, no explanation):
-[{{"bvid":"BV...","title":"clean song title","artist":"real singer name extracted from title"}}]
-
-IMPORTANT for "artist" field:
-- Extract the REAL singer/artist name from the video title, NOT the UP主 (uploader).
-- Example: title="周杰伦 - 晴天 [官方MV]" → artist="周杰伦", NOT the uploader name.
-- Example: title="【AcousticLab】晴天 翻唱Cover" → artist="AcousticLab" (the cover singer).
-- If you cannot determine the singer from the title, use the uploader name as fallback.
-
-Candidates:
+select best matches as single songs:
 "#,
         keyword
     );
 
     for (i, v) in candidates.iter().enumerate() {
+        let label = if i < 26 {
+            char::from(b'a' + i as u8).to_string()
+        } else {
+            format!("{}{}", char::from(b'a' + (i / 26 - 1) as u8), char::from(b'a' + (i % 26) as u8))
+        };
         prompt.push_str(&format!(
-            "{}. bvid={} title=\"{}\" author=\"{}\" typename=\"{}\" duration={} play={}\n",
-            i + 1,
-            v.bvid,
-            v.title.replace('"', "\\\""),
-            v.author.replace('"', "\\\""),
-            v.typename.replace('"', "\\\""),
-            v.duration,
-            v.play
+            "{}. {} | {} | {}\n",
+            label,
+            v.title.replace('|', " "),
+            v.typename,
+            v.duration
         ));
     }
 
     prompt
 }
 
-/// 从 LLM 响应中解析 (bvid, artist) 列表
-fn parse_llm_response(content: &str) -> Vec<LlmFilterItem> {
-    // 尝试直接解析；如果模型包了 markdown 代码块，先剥离
+/// 从 LLM 响应中解析选中的标签列表，返回对应 candidates 的索引
+fn parse_llm_response(content: &str) -> Vec<usize> {
     let json_str = content
         .strip_prefix("```json")
         .and_then(|s| s.strip_suffix("```"))
@@ -254,39 +244,29 @@ fn parse_llm_response(content: &str) -> Vec<LlmFilterItem> {
         .unwrap_or(content)
         .trim();
 
-    // 兼容旧版纯数组返回
-    if json_str.starts_with('[') {
-        let items: Vec<LlmSelectedItem> = match serde_json::from_str(json_str) {
-            Ok(i) => i,
-            Err(_) => return vec![],
-        };
-        return items
-            .into_iter()
-            .map(|i| LlmFilterItem {
-                bvid: i.bvid,
-                artist: i.artist,
-            })
-            .filter(|item| !item.bvid.is_empty())
-            .collect();
-    }
-
-    let parsed: LlmFilterResponse = match serde_json::from_str(json_str) {
-        Ok(p) => p,
+    let labels: Vec<String> = match serde_json::from_str(json_str) {
+        Ok(arr) => arr,
         Err(_) => return vec![],
     };
 
-    if !parsed.valid {
-        return vec![];
-    }
-
-    parsed
-        .results
+    labels
         .into_iter()
-        .map(|i| LlmFilterItem {
-            bvid: i.bvid,
-            artist: i.artist,
+        .filter_map(|s| {
+            let b = s.as_bytes();
+            if b.is_empty() {
+                return None;
+            }
+            if b.len() == 1 {
+                let idx = (b[0] as usize).wrapping_sub(b'a' as usize);
+                return Some(idx);
+            }
+            if b.len() == 2 {
+                let hi = (b[0] as usize).wrapping_sub(b'a' as usize);
+                let lo = (b[1] as usize).wrapping_sub(b'a' as usize);
+                return Some((hi + 1) * 26 + lo);
+            }
+            None
         })
-        .filter(|item| !item.bvid.is_empty())
         .collect()
 }
 

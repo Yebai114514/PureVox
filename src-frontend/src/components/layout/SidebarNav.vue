@@ -48,7 +48,7 @@ const npTrack = computed(() => playerState.track);
       </div>
       <div class="flex flex-col leading-none">
         <span class="font-display font-semibold text-base tracking-tight">PureVox</span>
-        <span class="text-[10px] text-[var(--text-muted)] font-mono">v0.1.0</span>
+            <span class="text-[10px] text-[var(--text-muted)] font-mono">v0.1.2</span>
       </div>
     </div>
 

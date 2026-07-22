@@ -52,6 +52,8 @@ export interface BackendSettings {
   apiKey: string;
   enabled: boolean;
   personalizationEnabled: boolean;
+  thinkingEnabled?: boolean;
+  reasoningEffort?: string;
 }
 
 export async function loadBackendSettings(): Promise<BackendSettings | null> {

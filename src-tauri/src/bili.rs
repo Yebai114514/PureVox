@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::llm::{llm_filter_songs, llm_generate_themes, LlmConfig, LlmFilterItem};
+use crate::llm::{llm_filter_songs, llm_generate_themes, extract_artist_from_title, LlmConfig};
 use crate::rank::{self, CandidateSong, HistorySong, PlayEvent as RankPlayEvent, UserProfileInput, RankInput};
 
 const BILI_HOME: &str = "https://www.bilibili.com";
@@ -305,18 +305,17 @@ pub async fn ai_filter_tracks(
     }
 
     // 2. 优先尝试 LLM 筛选（如果已启用且配置有效）
-    let mut llm_items: Vec<LlmFilterItem> = vec![];
+    let mut llm_bvids: Vec<String> = vec![];
     let mut used_llm = false;
     if let Some(ref cfg) = llm {
-        let llm_result = llm_filter_songs(&keyword, &candidates, cfg).await;
-        if !llm_result.is_empty() {
-            llm_items = llm_result;
+        llm_bvids = llm_filter_songs(&keyword, &candidates, cfg).await;
+        if !llm_bvids.is_empty() {
             used_llm = true;
         }
     }
 
     // 3. LLM 失败或未启用时回退到本地启发式评分
-    let mut ordered_bvids: Vec<String> = llm_items.iter().map(|i| i.bvid.clone()).collect();
+    let mut ordered_bvids: Vec<String> = llm_bvids.clone();
     if ordered_bvids.is_empty() {
         let kw_lower = keyword.to_lowercase();
         let mut scored: Vec<(f64, BiliVideo)> = candidates
@@ -358,12 +357,8 @@ pub async fn ai_filter_tracks(
         ordered_bvids = scored.into_iter().map(|(_, v)| v.bvid).collect();
     }
 
-    // 4. 按 LLM / 评分顺序映射为 SongItem，最多 20 条；同时进行后过滤
-    // 使用 LLM 提取的歌手名（如有）替代 UP 主名
-    let llm_artist_map: std::collections::HashMap<String, String> = llm_items
-        .iter()
-        .map(|i| (i.bvid.clone(), i.artist.clone()))
-        .collect();
+    // 4. 按 LLM / 评分顺序映射为 SongItem，最多 20 条
+    // 歌手名从标题中启发式提取（不再依赖 LLM）
     let mut list: Vec<SongItem> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for bvid in ordered_bvids {
@@ -375,8 +370,7 @@ pub async fn ai_filter_tracks(
                 continue;
             }
             seen.insert(bvid.clone());
-            let artist_override = llm_artist_map.get(&bvid).map(|s| s.as_str());
-            list.push(map_to_song_item_with_artist(v.clone(), artist_override));
+            list.push(map_to_song_item(v.clone()));
         }
     }
     list.truncate(20);
@@ -402,6 +396,7 @@ fn map_to_song_item_with_artist(v: BiliVideo, artist_override: Option<&str>) -> 
     let artist = artist_override
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
+        .or_else(|| extract_artist_from_title(&v.title))
         .unwrap_or_else(|| v.author.clone());
     SongItem {
         id: v.bvid.clone(),
@@ -738,109 +733,112 @@ pub async fn generate_recommend(
         DEFAULT_THEMES.iter().take(count).map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string())).collect()
     };
 
-    // 2. 并发为每个主题搜索 + 筛选
-    let mut playlists: Vec<Playlist> = Vec::new();
-    for (title, query, desc) in themes {
-        // 多线程并发搜索 3 页（约 60 条候选），扩大候选池以提升歌单丰富度
-        let (r1, r2, r3) = tokio::join!(
-            bili_search(query.clone(), Some(1), None),
-            bili_search(query.clone(), Some(2), None),
-            bili_search(query.clone(), Some(3), None),
-        );
-        // 合并 + 按 bvid 去重
-        let mut seen_bvids = std::collections::HashSet::new();
-        let mut candidates: Vec<BiliVideo> = Vec::new();
-        for r in [r1, r2, r3] {
-            if let Ok(res) = r {
-                for v in res.list {
-                    if seen_bvids.insert(v.bvid.clone()) {
-                        candidates.push(v);
+    // 2. 并发为每个主题搜索 + 筛选（所有主题并行处理）
+    let llm_cfg = llm.clone();
+    let user_prof = user_profile.clone();
+    let theme_futures: Vec<_> = themes.into_iter().map(|(title, query, desc)| {
+        let llm_cfg = llm_cfg.clone();
+        let user_prof = user_prof.clone();
+        async move {
+            let (r1, r2, r3) = tokio::join!(
+                bili_search(query.clone(), Some(1), None),
+                bili_search(query.clone(), Some(2), None),
+                bili_search(query.clone(), Some(3), None),
+            );
+            let mut seen_bvids = std::collections::HashSet::new();
+            let mut candidates: Vec<BiliVideo> = Vec::new();
+            for r in [r1, r2, r3] {
+                if let Ok(res) = r {
+                    for v in res.list {
+                        if seen_bvids.insert(v.bvid.clone()) {
+                            candidates.push(v);
+                        }
                     }
                 }
             }
-        }
-        if candidates.is_empty() {
-            continue;
-        }
+            if candidates.is_empty() {
+                return None::<Playlist>;
+            }
 
-        // 筛选单曲：优先 LLM（同时提取歌手名），失败则本地启发式 + 过滤
-        let mut tracks: Vec<SongItem> = Vec::new();
-        const MAX_PER_PLAYLIST: usize = 12; // 从 6 提到 12，配合 60 条候选池
-        const MIN_PER_PLAYLIST: usize = 3; // 少于 3 首视为无效歌单
+            let mut tracks: Vec<SongItem> = Vec::new();
+            const MAX_PER_PLAYLIST: usize = 12;
+            const MIN_PER_PLAYLIST: usize = 3;
 
-        if llm_enabled {
-            let llm_items = llm_filter_songs(&query, &candidates, llm.as_ref().unwrap()).await;
-            if !llm_items.is_empty() {
-                let mut seen = std::collections::HashSet::new();
-                for item in &llm_items {
-                    if seen.contains(&item.bvid) {
-                        continue;
-                    }
-                    if let Some(v) = candidates.iter().find(|c| c.bvid == item.bvid) {
-                        if is_valid_single_song(&v.title, &v.duration, &v.typename) {
-                            seen.insert(item.bvid.clone());
-                            // 使用 LLM 提取的歌手名，而非 UP 主名
-                            tracks.push(map_to_song_item_with_artist(
-                                v.clone(),
-                                Some(&item.artist),
-                            ));
+            if llm_enabled {
+                if let Some(ref cfg) = llm_cfg {
+                    let llm_bvids = llm_filter_songs(&query, &candidates, cfg).await;
+                    if !llm_bvids.is_empty() {
+                        let mut seen = std::collections::HashSet::new();
+                        for bvid in &llm_bvids {
+                            if seen.contains(bvid) {
+                                continue;
+                            }
+                            if let Some(v) = candidates.iter().find(|c| c.bvid == *bvid) {
+                                if is_valid_single_song(&v.title, &v.duration, &v.typename) {
+                                    seen.insert(bvid.clone());
+                                    tracks.push(map_to_song_item(v.clone()));
+                                }
+                            }
+                            if tracks.len() >= MAX_PER_PLAYLIST {
+                                break;
+                            }
                         }
                     }
+                }
+            }
+
+            if tracks.len() < MIN_PER_PLAYLIST {
+                tracks.clear();
+                let mut scored: Vec<(f64, &BiliVideo)> = candidates
+                    .iter()
+                    .map(|v| {
+                        let mut s = 0.0;
+                        let lower = v.title.to_lowercase();
+                        let music_tags = ["mv", "music", "cover", "翻唱", "live", "official", "音频", "音乐", "主题曲"];
+                        for tag in music_tags {
+                            if lower.contains(tag) {
+                                s += 15.0;
+                            }
+                        }
+                        s += (v.play.max(1) as f64).ln() * 3.0;
+                        (s, v)
+                    })
+                    .collect();
+                scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                for (_, v) in scored {
                     if tracks.len() >= MAX_PER_PLAYLIST {
                         break;
                     }
-                }
-            }
-        }
-
-        // LLM 未启用或失败 → 本地启发式 + 过滤
-        if tracks.len() < MIN_PER_PLAYLIST {
-            tracks.clear();
-            let mut scored: Vec<(f64, &BiliVideo)> = candidates
-                .iter()
-                .map(|v| {
-                    let mut s = 0.0;
-                    let lower = v.title.to_lowercase();
-                    let music_tags = ["mv", "music", "cover", "翻唱", "live", "official", "音频", "音乐", "主题曲"];
-                    for tag in music_tags {
-                        if lower.contains(tag) {
-                            s += 15.0;
-                        }
+                    if is_valid_single_song(&v.title, &v.duration, &v.typename) {
+                        tracks.push(map_to_song_item(v.clone()));
                     }
-                    s += (v.play.max(1) as f64).ln() * 3.0;
-                    (s, v)
-                })
-                .collect();
-            scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-            for (_, v) in scored {
-                if tracks.len() >= MAX_PER_PLAYLIST {
-                    break;
-                }
-                if is_valid_single_song(&v.title, &v.duration, &v.typename) {
-                    tracks.push(map_to_song_item(v.clone()));
                 }
             }
-        }
 
-        if tracks.len() < MIN_PER_PLAYLIST {
-            continue;
-        }
+            if tracks.len() < MIN_PER_PLAYLIST {
+                return None;
+            }
 
-        // 个性化重排序：对歌单内的歌曲按用户画像重排
-        if personalization_on {
-            tracks = rank_playlist_tracks(tracks, user_profile.as_ref().unwrap());
-        }
+            if personalization_on {
+                if let Some(ref up) = user_prof {
+                    tracks = rank_playlist_tracks(tracks, up);
+                }
+            }
 
-        let cover = tracks.first().map(|t| t.cover.clone()).unwrap_or_default();
-        let id = format!("pl-{:x}", fxhash_str(&title));
-        playlists.push(Playlist {
-            id,
-            title,
-            description: desc,
-            cover,
-            tracks,
-        });
-    }
+            let cover = tracks.first().map(|t| t.cover.clone()).unwrap_or_default();
+            let id = format!("pl-{:x}", fxhash_str(&title));
+            Some(Playlist {
+                id,
+                title,
+                description: desc,
+                cover,
+                tracks,
+            })
+        }
+    }).collect();
+
+    let results = futures::future::join_all(theme_futures).await;
+    let playlists: Vec<Playlist> = results.into_iter().filter_map(|r| r).collect();
 
     Ok(RecommendResult {
         playlists,

@@ -3,7 +3,8 @@
 // 三大区块：主题色完整自定义（RGB+Alpha 拖拽滑块）/ 动效偏好 / 播放偏好
 // 用户偏好：完整 RGB+Alpha 控制 + 拖拽滑块（不用左右点击）
 import { ref, reactive, computed, watch, onMounted } from 'vue';
-import { Palette, Sparkles, Volume2, Search, Check, RotateCcw } from 'lucide-vue-next';
+import { Palette, Sparkles, Volume2, Search, Check, RotateCcw, Brain, Gauge } from 'lucide-vue-next';
+import GlassSelect from '@/components/ui/GlassSelect.vue';
 import GlassCard from '@/components/ui/GlassCard.vue';
 import { loadLlmConfig, saveLlmConfig, getDefaultLlmConfig, type LlmConfig } from '@/stores/settings';
 import { loadTheme, saveTheme, applyTheme, DEFAULT_THEME } from '@/stores/theme';
@@ -334,6 +335,52 @@ const devices = ['系统默认', '外接 DAC', '蓝牙耳机'];
               </button>
             </div>
 
+            <!-- 思考模式 & 思考深度分割线 -->
+            <div class="h-px bg-white/5"></div>
+
+            <!-- 思考模式开关 -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Brain class="w-4 h-4 text-[var(--text-secondary)]" :stroke-width="1.5" />
+                <div>
+                  <div class="text-sm font-medium">思考模式</div>
+                  <div class="text-xs text-[var(--text-muted)] mt-0.5">启用后模型会先输出思维链再给出最终答案</div>
+                </div>
+              </div>
+              <button
+                @click="llm.thinkingEnabled = !llm.thinkingEnabled"
+                class="relative w-11 h-6 rounded-full transition-colors duration-swift ease-out-soft flex-none"
+                :style="{ background: llm.thinkingEnabled ? 'rgba(var(--accent-primary-rgb),0.9)' : 'rgba(255,255,255,0.1)' }"
+              >
+                <span
+                  class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-swift ease-spring"
+                  :style="{ transform: llm.thinkingEnabled ? 'translateX(20px)' : 'translateX(0)' }"
+                ></span>
+              </button>
+            </div>
+
+            <!-- 思考深度选择 -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Gauge class="w-4 h-4 text-[var(--text-secondary)]" :stroke-width="1.5" />
+                <div>
+                  <div class="text-sm font-medium">思考深度</div>
+                  <div class="text-xs text-[var(--text-muted)] mt-0.5">low → medium → high → max，越高越深入但更慢</div>
+                </div>
+              </div>
+              <GlassSelect
+                v-model="llm.reasoningEffort"
+                :options="[
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
+                  { value: 'max', label: 'Max' },
+                ]"
+                placeholder="选择深度"
+                :disabled="!llm.thinkingEnabled"
+              />
+            </div>
+
             <div class="h-px bg-white/5"></div>
 
             <label class="block">
@@ -513,12 +560,10 @@ const devices = ['系统默认', '外接 DAC', '蓝牙耳机'];
 
             <div class="flex items-center justify-between py-1">
               <span class="text-sm font-medium">音频输出设备</span>
-              <select
+              <GlassSelect
                 v-model="playback.outputDevice"
-                class="px-3 py-1.5 rounded-lg glass-l1 text-xs outline-none cursor-pointer"
-              >
-                <option v-for="d in devices" :key="d" :value="d" class="bg-[var(--bg-base)]">{{ d }}</option>
-              </select>
+                :options="devices.map(d => ({ value: d, label: d }))"
+              />
             </div>
           </GlassCard>
         </div>

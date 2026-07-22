@@ -9,6 +9,8 @@ export interface LlmConfig {
   apiKey: string;
   enabled: boolean;
   personalizationEnabled: boolean;
+  thinkingEnabled: boolean;
+  reasoningEffort: 'low' | 'medium' | 'high' | 'max';
 }
 
 const DEFAULT_CONFIG: LlmConfig = {
@@ -17,6 +19,8 @@ const DEFAULT_CONFIG: LlmConfig = {
   apiKey: '',
   enabled: false,
   personalizationEnabled: true,
+  thinkingEnabled: false,
+  reasoningEffort: 'high',
 };
 
 let cached: LlmConfig | null = null;
@@ -26,7 +30,14 @@ export function getDefaultLlmConfig(): LlmConfig {
 }
 
 function backendToConfig(s: BackendSettings): LlmConfig {
-  return { ...DEFAULT_CONFIG, ...s };
+  return {
+    ...DEFAULT_CONFIG,
+    ...s,
+    thinkingEnabled: s.thinkingEnabled ?? DEFAULT_CONFIG.thinkingEnabled,
+    reasoningEffort: (['low','medium','high','max'].includes(s.reasoningEffort ?? '')
+      ? s.reasoningEffort
+      : DEFAULT_CONFIG.reasoningEffort) as LlmConfig['reasoningEffort'],
+  };
 }
 
 export async function loadLlmConfig(): Promise<LlmConfig> {
@@ -44,6 +55,8 @@ export async function saveLlmConfig(config: LlmConfig): Promise<void> {
     apiKey: config.apiKey,
     enabled: config.enabled,
     personalizationEnabled: config.personalizationEnabled,
+    thinkingEnabled: config.thinkingEnabled,
+    reasoningEffort: config.reasoningEffort,
   };
   await saveBackendSettings(payload);
 }
