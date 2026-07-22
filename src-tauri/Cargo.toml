@@ -1,0 +1,33 @@
+[package]
+name = "purevox"
+version = "0.1.0"
+description = "PureVox 桌面音乐播放器"
+authors = ["PureVox"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "purevox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# B 站搜索后端命令：reqwest + cookie_store 用于绕过浏览器 CORS 和反爬
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "cookies", "gzip"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+once_cell = "1"
+base64 = "0.22"
+aes-gcm = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+machine-uid = "0.5"
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

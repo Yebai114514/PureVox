@@ -1,0 +1,360 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   PureVox 设计令牌 — 来源于 PRD §4.1 / §4.2 / §4.3
+   ============================================================ */
+:root {
+  /* 背景层 */
+  --bg-base: #0a0a0f;
+  --bg-gradient-1: radial-gradient(at 20% 20%, rgba(var(--accent-primary-rgb), 0.18), transparent 50%);
+  --bg-gradient-2: radial-gradient(at 80% 80%, rgba(var(--accent-secondary-rgb), 0.12), transparent 55%);
+  --bg-gradient-3: radial-gradient(at 50% 0%, rgba(var(--accent-primary-rgb), 0.08), transparent 60%);
+
+  /* 强调色（用户可完整自定义 RGB+Alpha） */
+  --accent-primary-rgb: 124, 92, 255; /* #7C5CFF */
+  --accent-secondary-rgb: 92, 245, 255; /* #5CF5FF */
+  --accent-glow: rgba(var(--accent-primary-rgb), 0.4);
+  --accent-glow-strong: rgba(var(--accent-primary-rgb), 0.6);
+
+  /* 玻璃材质层（PRD §4.2） */
+  --glass-l1-bg: rgba(255, 255, 255, 0.06);
+  --glass-l1-border: rgba(255, 255, 255, 0.12);
+  --glass-l1-blur: 24px;
+  --glass-l1-saturation: 180%;
+
+  --glass-l2-bg: rgba(20, 20, 30, 0.55);
+  --glass-l2-border: rgba(255, 255, 255, 0.1);
+  --glass-l2-blur: 40px;
+
+  --glass-l3-bg: rgba(15, 15, 22, 0.75);
+  --glass-l3-border: rgba(255, 255, 255, 0.15);
+  --glass-l3-blur: 60px;
+
+  --glass-hover-bg: rgba(255, 255, 255, 0.1);
+  --glass-active-bg: rgba(124, 92, 255, 0.15);
+
+  /* 文字 */
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-muted: rgba(255, 255, 255, 0.4);
+
+  /* 字体：统一使用现代系统无衬线字体栈，移除 Sora/Manrope/JetBrains Mono */
+  --font-display: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', 'Hiragino Sans GB', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', 'Hiragino Sans GB', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', 'Hiragino Sans GB', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, ui-monospace, monospace;
+
+  /* 动效令牌（PRD §4.3） */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-soft: cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-in-out-soft: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-glass: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-emphasis: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --dur-instant: 80ms;
+  --dur-quick: 150ms;
+  --dur-swift: 220ms;
+  /* 规范要求 UI 动画 ≤ 300ms；standard 用于一般 UI 元素，故设为 250ms */
+  --dur-standard: 250ms;
+  /* deliberate 仅用于非交互装饰场景（背景光晕等），UI 元素禁用 */
+  --dur-deliberate: 480ms;
+  --dur-cinematic: 800ms;
+}
+
+/* ============================================================
+   基础排版
+   ============================================================ */
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  background: var(--bg-base);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+input {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* ============================================================
+   背景氛围（多层光晕）
+   ============================================================ */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    var(--bg-gradient-1),
+    var(--bg-gradient-2),
+    var(--bg-gradient-3),
+    var(--bg-base);
+  overflow: hidden;
+}
+
+/* 呼吸灯光晕：随时间缓慢缩放 + 透明度变化 */
+.app-backdrop::before {
+  content: '';
+  position: absolute;
+  top: -20%;
+  right: -10%;
+  width: 70vw;
+  height: 70vw;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at center,
+    rgba(var(--accent-primary-rgb), 0.28) 0%,
+    rgba(var(--accent-secondary-rgb), 0.12) 35%,
+    transparent 70%
+  );
+  filter: blur(80px);
+  animation: breathe 10s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.app-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.5'/></svg>");
+  opacity: 0.025;
+  mix-blend-mode: overlay;
+}
+
+@keyframes breathe {
+  0%, 100% {
+    opacity: 0.62;
+    transform: scale(0.985) translate(0, 0);
+  }
+  50% {
+    opacity: 0.82;
+    transform: scale(1.015) translate(-1%, 1%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-backdrop::before {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   玻璃材质工具类
+   ============================================================ */
+@layer components {
+  /* L1：卡片/按钮 */
+  .glass-l1 {
+    background-color: var(--glass-l1-bg);
+    border: 1px solid var(--glass-l1-border);
+    backdrop-filter: blur(var(--glass-l1-blur)) saturate(var(--glass-l1-saturation));
+    -webkit-backdrop-filter: blur(var(--glass-l1-blur)) saturate(var(--glass-l1-saturation));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.15),
+      0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  /* L2：侧边栏/播放栏 */
+  .glass-l2 {
+    background-color: var(--glass-l2-bg);
+    border: 1px solid var(--glass-l2-border);
+    backdrop-filter: blur(var(--glass-l2-blur)) saturate(200%);
+    -webkit-backdrop-filter: blur(var(--glass-l2-blur)) saturate(200%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.1),
+      0 12px 40px rgba(0, 0, 0, 0.45);
+  }
+
+  /* L3：模态/弹窗 */
+  .glass-l3 {
+    background-color: var(--glass-l3-bg);
+    border: 1px solid var(--glass-l3-border);
+    backdrop-filter: blur(var(--glass-l3-blur)) saturate(220%);
+    -webkit-backdrop-filter: blur(var(--glass-l3-blur)) saturate(220%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 24px 60px rgba(0, 0, 0, 0.55);
+  }
+
+  /* hover 增强层（叠加在 L1 上） */
+  .glass-hover {
+    transition:
+      background-color var(--dur-swift) var(--ease-out-soft),
+      border-color var(--dur-swift) var(--ease-out-soft),
+      box-shadow var(--dur-swift) var(--ease-out-soft),
+      transform var(--dur-swift) var(--ease-spring);
+  }
+  .glass-hover:hover {
+    background-color: var(--glass-hover-bg);
+    border-color: rgba(var(--accent-primary-rgb), 0.4);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.15),
+      0 0 24px rgba(var(--accent-primary-rgb), 0.35),
+      0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  /* 胶囊形玻璃按钮 */
+  .btn-glass {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    color: var(--text-primary);
+    transition: transform var(--dur-quick) var(--ease-out-soft),
+                background-color var(--dur-swift) var(--ease-out-soft),
+                box-shadow var(--dur-swift) var(--ease-out-soft);
+  }
+  .btn-glass:active {
+    transform: scale(0.97);
+  }
+
+  /* 圆形图标按钮（PRD §4.1） */
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    color: var(--text-secondary);
+    transition: transform var(--dur-quick) var(--ease-out-soft),
+                color var(--dur-quick) var(--ease-out-soft),
+                background-color var(--dur-swift) var(--ease-out-soft),
+                box-shadow var(--dur-swift) var(--ease-out-soft);
+  }
+  .icon-btn:hover {
+    color: var(--text-primary);
+    background-color: var(--glass-hover-bg);
+  }
+  .icon-btn:active {
+    transform: scale(0.97);
+  }
+  .icon-btn.is-accent {
+    color: var(--text-primary);
+    background-color: rgba(var(--accent-primary-rgb), 0.9);
+    box-shadow: 0 0 20px rgba(var(--accent-primary-rgb), 0.45);
+  }
+  .icon-btn.is-accent:hover {
+    background-color: rgba(var(--accent-primary-rgb), 1);
+    box-shadow: 0 0 28px rgba(var(--accent-primary-rgb), 0.65);
+  }
+  .icon-btn.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .icon-btn.is-disabled:hover {
+    background-color: transparent;
+    color: var(--text-secondary);
+  }
+}
+
+/* ============================================================
+   自定义滚动条（深色玻璃风格）
+   ============================================================ */
+.scroll-area {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* 横向滚动条更细 */
+.scroll-x {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+.scroll-x::-webkit-scrollbar {
+  height: 6px;
+}
+.scroll-x::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+
+/* ============================================================
+   通用动画工具
+   ============================================================ */
+.stagger > * {
+  opacity: 0;
+  transform: translateY(12px);
+  animation: fade-up var(--dur-swift) var(--ease-out-soft) forwards;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 40ms; }
+.stagger > *:nth-child(3) { animation-delay: 80ms; }
+.stagger > *:nth-child(4) { animation-delay: 120ms; }
+.stagger > *:nth-child(5) { animation-delay: 160ms; }
+.stagger > *:nth-child(6) { animation-delay: 200ms; }
+.stagger > *:nth-child(7) { animation-delay: 240ms; }
+.stagger > *:nth-child(8) { animation-delay: 280ms; }
+.stagger > *:nth-child(9) { animation-delay: 320ms; }
+.stagger > *:nth-child(10) { animation-delay: 360ms; }
+.stagger > *:nth-child(n+11) { animation-delay: 400ms; }
+
+@keyframes fade-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+   可访问性：减弱动画
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: var(--dur-instant) !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--dur-instant) !important;
+  }
+}
+
+/* 触摸设备 hover 优化 */
+@media (hover: hover) and (pointer: fine) {
+  .interactive-hover:hover {
+    transform: translateY(-4px) scale(1.03);
+  }
+}
