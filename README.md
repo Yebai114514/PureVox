@@ -98,10 +98,16 @@ gh auth login
 
 ### 一键发布
 
-在仓库根目录执行：
+在仓库根目录执行（PowerShell 或 Batch 任选其一）：
 
 ```powershell
+# PowerShell
 .\scripts\release.ps1
+```
+
+```batch
+:: Batch
+.\scripts\release.bat
 ```
 
 脚本会依次完成：
