@@ -2,10 +2,12 @@
 // TrackItem - 歌曲列表行
 // 入场使用 fade-up + stagger（由父级 .stagger 容器驱动）
 // hover 使用 background-color + 边框微亮（避免 transform 干扰列表布局）
-import { Plus, Heart } from 'lucide-vue-next';
+import { Plus, Heart, Play, ListPlus, Copy, ExternalLink } from 'lucide-vue-next';
 import { formatTime } from '@/data/mock';
 import CoverImage from '@/components/ui/CoverImage.vue';
 import { isFavorite, toggleFavorite } from '@/stores/favorites';
+import { addToQueue } from '@/stores/player';
+import { showContextMenu, type ContextMenuItem } from '@/stores/contextMenu';
 
 interface TrackLike {
   id?: string;
@@ -17,7 +19,7 @@ interface TrackLike {
   cover: string;
 }
 
-defineProps<{
+const props = defineProps<{
   track: TrackLike;
   index?: number;
   active?: boolean;
@@ -25,10 +27,45 @@ defineProps<{
   compact?: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'play', id: string): void;
   (e: 'add-to-queue', track: TrackLike): void;
 }>();
+
+function onContextMenu(e: MouseEvent) {
+  const items: ContextMenuItem[] = [
+    {
+      label: '播放',
+      iconComponent: Play,
+      action: () => emit('play', props.track.id ?? props.track.bvid ?? ''),
+    },
+    {
+      label: '添加到队列',
+      iconComponent: ListPlus,
+      action: () => addToQueue(props.track as any),
+    },
+    {
+      label: isFavorite(props.track.bvid ?? '') ? '取消收藏' : '收藏',
+      iconComponent: Heart,
+      action: () => toggleFavorite(props.track as any),
+      disabled: !props.track.bvid,
+    },
+    { separator: true, label: '' },
+    {
+      label: '复制链接',
+      iconComponent: Copy,
+      action: () => {
+        const url = props.track.bvid
+          ? `https://www.bilibili.com/video/${props.track.bvid}`
+          : window.location.href;
+        navigator.clipboard.writeText(url);
+      },
+      disabled: !props.track.bvid,
+    },
+  ];
+
+  showContextMenu(e, items);
+}
 </script>
 
 <template>
@@ -38,6 +75,7 @@ defineEmits<{
       ? 'bg-[rgba(var(--accent-primary-rgb),0.15)] text-[var(--text-primary)]'
       : 'hover:bg-white/5 text-[var(--text-secondary)]'"
     @dblclick="$emit('play', track.id ?? track.bvid ?? '')"
+    @contextmenu="onContextMenu"
   >
     <!-- 序号 / 播放指示 -->
     <div class="w-6 flex-none text-center font-mono text-xs text-[var(--text-muted)]">

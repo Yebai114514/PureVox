@@ -7,17 +7,28 @@ import { onMounted } from 'vue';
 import SidebarNav from '@/components/layout/SidebarNav.vue';
 import TopBar from '@/components/layout/TopBar.vue';
 import PlayerBar from '@/components/layout/PlayerBar.vue';
+import ContextMenu from '@/components/ui/ContextMenu.vue';
 import { loadTheme, applyTheme } from '@/stores/theme';
+import { hideContextMenu } from '@/stores/contextMenu';
 
 onMounted(async () => {
   applyTheme(await loadTheme());
+  window.addEventListener('contextmenu', (e) => {
+    if (!(e.target as HTMLElement)?.closest?.('[data-context-menu]')) {
+      e.preventDefault();
+    }
+  });
 });
+
+function onGlobalClick(e: MouseEvent) {
+  hideContextMenu();
+}
 </script>
 
 <template>
   <div class="app-backdrop"></div>
 
-  <div class="relative z-10 h-full flex">
+  <div class="relative z-10 h-full flex" @click="onGlobalClick">
     <!-- 侧边栏 -->
     <SidebarNav />
 
@@ -42,4 +53,6 @@ onMounted(async () => {
       <PlayerBar />
     </main>
   </div>
+
+  <ContextMenu />
 </template>
