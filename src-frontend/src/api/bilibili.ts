@@ -108,24 +108,60 @@ export class BiliApiError extends Error {
 // 封面代理缓存：B 站图片直接加载常被 referer/防盗链拦截，由后端代理为 base64 data URL
 const coverCache = new Map<string, string>();
 
-export async function fetchCover(url: string): Promise<string> {
-  if (!url || !url.startsWith('http')) return url;
-  if (coverCache.has(url)) return coverCache.get(url)!;
+// 批量请求队列：将多个 fetchCover 合并为一次 fetch_covers_batch IPC 调用
+let coverBatchQueue: Map<string, Array<{ resolve: (v: string) => void; reject: (e: unknown) => void }>> | null = null;
+let coverBatchTimer: ReturnType<typeof setTimeout> | null = null;
 
+async function flushCoverBatch() {
+  coverBatchTimer = null;
+  const batch = coverBatchQueue;
+  coverBatchQueue = null;
+
+  if (!batch || batch.size === 0) return;
+
+  const urls = Array.from(batch.keys());
   const tauriInvoke = getTauriInvoke();
+
   if (!tauriInvoke) {
-    // dev 无 Tauri 时直接返回原图，依赖浏览器加载
-    return url;
+    for (const [url, callbacks] of batch) {
+      callbacks.forEach(cb => cb.resolve(url));
+    }
+    return;
   }
 
   try {
-    const dataUrl = await tauriInvoke<string>('fetch_cover', { url });
-    coverCache.set(url, dataUrl);
-    return dataUrl;
+    const results = await tauriInvoke<Array<[string, string]>>('fetch_covers_batch', { urls });
+    const resultMap = new Map(results);
+    for (const [url, callbacks] of batch) {
+      const dataUrl = resultMap.get(url) || url;
+      if (dataUrl) coverCache.set(url, dataUrl);
+      callbacks.forEach(cb => cb.resolve(dataUrl));
+    }
   } catch (e) {
-    console.error('fetch cover failed:', e);
-    return url;
+    for (const [url, callbacks] of batch) {
+      callbacks.forEach(cb => cb.resolve(url));
+    }
   }
+}
+
+export function fetchCover(url: string): Promise<string> {
+  if (!url || !url.startsWith('http')) return Promise.resolve(url);
+  if (coverCache.has(url)) return Promise.resolve(coverCache.get(url)!);
+
+  if (!coverBatchQueue) {
+    coverBatchQueue = new Map();
+  }
+
+  return new Promise((resolve, reject) => {
+    if (!coverBatchQueue!.has(url)) {
+      coverBatchQueue!.set(url, []);
+    }
+    coverBatchQueue!.get(url)!.push({ resolve, reject });
+
+    if (!coverBatchTimer) {
+      coverBatchTimer = setTimeout(flushCoverBatch, 0);
+    }
+  });
 }
 
 /**

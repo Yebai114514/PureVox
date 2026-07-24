@@ -83,58 +83,6 @@ pnpm tauri build
 
 > 注意：`data/` 目录属于运行时数据，不会被提交到 Git。
 
-## 发布 Release（一键部署）
-
-本项目提供一键发布脚本，自动完成构建并上传安装包到 GitHub Release。
-
-### 前置条件
-
-1. 已安装 [Node.js](https://nodejs.org/)、[pnpm](https://pnpm.io/)、[Rust](https://www.rust-lang.org/tools/install)
-2. 已安装 [GitHub CLI](https://cli.github.com/) (`gh`) 且已登录：
-
-```powershell
-gh auth login
-```
-
-### 一键发布
-
-在仓库根目录执行（PowerShell 或 Batch 任选其一）：
-
-```powershell
-# PowerShell
-.\scripts\release.ps1
-```
-
-```batch
-:: Batch
-.\scripts\release.bat
-```
-
-脚本会依次完成：
-
-1. 检查 `gh` 登录状态
-2. 从 `src-tauri/Cargo.toml` 读取版本号
-3. 确认发布
-4. 结束正在运行的 `purevox.exe`（避免文件锁定）
-5. 执行 `pnpm install` 和 `pnpm tauri build`
-6. 检查构建产物
-7. 创建 GitHub Release 并上传：
-   - `purevox.exe` —— 绿色版可执行文件
-   - `PureVox_x.x.x_x64_en-US.msi` —— Windows 安装包（MSI）
-   - `PureVox_x.x.x_x64-setup.exe` —— Windows 安装包（NSIS）
-
-发布完成后，终端会输出 Release 访问地址。
-
-### 手动发布
-
-如果不使用脚本，也可以在 GitHub 网页操作：
-
-1. 本地执行 `pnpm tauri build` 完成构建
-2. 打开仓库 Releases 页面 → `Draft a new release`
-3. 输入 Tag（如 `v0.1.0`）和标题
-4. 上传 `src-tauri/target/release/` 下的 `purevox.exe` 以及 `bundle/` 目录中的安装包
-5. 点击 `Publish release`
-
 ## 许可证
 
 [MIT](./LICENSE)

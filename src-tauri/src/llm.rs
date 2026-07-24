@@ -1,6 +1,7 @@
 // LLM 歌曲筛选模块
 // 通过 OpenAI 兼容的 /chat/completions 接口，让大模型从 B 站候选视频中挑选最相关的歌曲 / MV。
 
+use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -8,6 +9,14 @@ use std::time::Duration;
 use crate::bili::BiliVideo;
 
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+static LLM_CLIENT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .user_agent(UA)
+        .timeout(Duration::from_secs(60))
+        .build()
+        .expect("failed to build reqwest client for LLM")
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,15 +138,6 @@ pub async fn llm_filter_songs(
         return vec![];
     }
 
-    let client = match Client::builder()
-        .user_agent(UA)
-        .timeout(Duration::from_secs(60))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-
     let prompt = build_prompt(keyword, candidates);
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
 
@@ -164,7 +164,7 @@ Reply ONLY a JSON array like ["a","c","f"] or []. No explanation."#.to_string(),
         max_tokens: 120,
     };
 
-    let resp = match client
+    let resp = match LLM_CLIENT
         .post(&url)
         .header("Authorization", format!("Bearer {}", config.api_key))
         .header("Content-Type", "application/json")
@@ -282,15 +282,6 @@ pub async fn llm_generate_themes(
         return vec![];
     }
 
-    let client = match Client::builder()
-        .user_agent(UA)
-        .timeout(Duration::from_secs(30))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-
     let seeds = if seed_keywords.is_empty() {
         "（无）".to_string()
     } else {
@@ -330,7 +321,7 @@ pub async fn llm_generate_themes(
         max_tokens: 800,
     };
 
-    let resp = match client
+    let resp = match LLM_CLIENT
         .post(&url)
         .header("Authorization", format!("Bearer {}", config.api_key))
         .header("Content-Type", "application/json")

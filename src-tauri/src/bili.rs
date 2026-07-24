@@ -284,13 +284,15 @@ pub async fn ai_filter_tracks(
     } else {
         2
     };
+    let page_futures: Vec<_> = (1..=pages).map(|page| {
+        bili_search(keyword.clone(), Some(page), None)
+    }).collect();
     let mut candidates: Vec<BiliVideo> = Vec::new();
-    for page in 1..=pages {
-        let res = bili_search(keyword.clone(), Some(page), None).await?;
-        if res.list.is_empty() {
-            break;
+    for res in futures::future::join_all(page_futures).await {
+        if let Ok(r) = res {
+            if r.list.is_empty() { break; }
+            candidates.extend(r.list);
         }
-        candidates.extend(res.list);
     }
 
     let total = candidates.len() as i64;
@@ -634,6 +636,42 @@ pub async fn fetch_cover(url: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", content_type, base64))
 }
 
+/// 批量并发下载封面，返回 (url, base64_data_url) 列表
+/// 使用 join_all 并行下载，减少串行 IPC + HTTP 开销
+#[tauri::command]
+pub async fn fetch_covers_batch(urls: Vec<String>) -> Vec<(String, String)> {
+    let client = CLIENT.clone();
+    let results = futures::future::join_all(urls.into_iter().map(|url| {
+        let client = client.clone();
+        async move {
+            if url.is_empty() || (!url.starts_with("http://") && !url.starts_with("https://")) {
+                return (url, String::new());
+            }
+            let result = async {
+                let resp = client
+                    .get(&url)
+                    .header("Referer", "https://www.bilibili.com")
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let content_type = resp
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.split(';').next().unwrap_or(s).to_string())
+                    .unwrap_or_else(|| infer_mime_from_url(&url));
+                let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+                let b64 = tokio::task::spawn_blocking(move || {
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)
+                }).await.map_err(|e| e.to_string())?;
+                Ok::<_, String>(format!("data:{};base64,{}", content_type, b64))
+            }.await;
+            (url, result.unwrap_or_default())
+        }
+    })).await;
+    results
+}
+
 fn infer_mime_from_url(url: &str) -> String {
     let lower = url.to_lowercase();
     if lower.ends_with(".png") {
@@ -820,9 +858,16 @@ pub async fn generate_recommend(
             }
 
             if personalization_on {
-                if let Some(ref up) = user_prof {
-                    tracks = rank_playlist_tracks(tracks, up);
-                }
+                tracks = match tokio::task::spawn_blocking(move || {
+                    if let Some(up) = user_prof {
+                        rank_playlist_tracks(tracks, &up)
+                    } else {
+                        tracks
+                    }
+                }).await {
+                    Ok(t) => t,
+                    Err(_) => return None,
+                };
             }
 
             let cover = tracks.first().map(|t| t.cover.clone()).unwrap_or_default();

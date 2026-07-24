@@ -617,12 +617,13 @@ fn score_candidates(
     stats_map: &HashMap<String, SongStats>,
     recent_songs: &[&HistorySong],
     cfg: &RankConfig,
+    now_ts: i64,
 ) -> Vec<ScoredCandidate> {
     candidates.iter().map(|song| {
         let stats = stats_map.get(&song.song_id);
         let taste = compute_taste_score(song, profile, cfg);
         let session = compute_session_score(song, recent_songs, cfg);
-        let replay = compute_replay_score(song, stats, Utc::now().timestamp());
+        let replay = compute_replay_score(song, stats, now_ts);
         let discovery = compute_discovery_score(song, taste, stats);
         let quality = song.base_hot_score.clamp(0.0, 100.0);
 
@@ -922,7 +923,7 @@ pub fn rank_candidates(input: RankInput) -> Vec<CandidateSong> {
         .collect();
 
     // 打分
-    let mut scored = score_candidates(&candidates, &profile, &stats_map, &recent_songs, &cfg);
+    let mut scored = score_candidates(&candidates, &profile, &stats_map, &recent_songs, &cfg, now_ts);
 
     // 惩罚
     let active_penalty_tags = if ctx.active_penalty_tags.is_empty() {
